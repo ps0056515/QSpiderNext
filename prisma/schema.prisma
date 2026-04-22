@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// SQLite: use strings instead of enums (enums not supported)
+
+model User {
+  id             String             @id @default(cuid())
+  email          String             @unique
+  name           String?
+  passwordHash   String
+  role           String             @default("USER")
+  createdAt      DateTime           @default(now())
+  enrollments    Enrollment[]
+  lessonProgress LessonProgress[]
+  certificates   Certificate[]
+  orders         Order[]
+  /// Courses this user created as a trainer
+  trainerCourses Course[]           @relation("TrainerCourses")
+  pathEnrollments PathEnrollment[]
+  payoutBatches  PayoutBatch[]
+  discussionThreads DiscussionThread[]
+}
+
+model Course {
+  id             String         @id @default(cuid())
+  slug           String         @unique
+  title          String
+  category       String
+  level          String
+  hours          Int
+  instructor     String
+  description    String
+  tagsJson       String
+  featured       Boolean        @default(false)
+  certPrep       Boolean        @default(false)
+  /// DRAFT | PENDING_REVIEW | PUBLISHED | REJECTED
+  publishStatus  String         @default("PUBLISHED")
+  rejectReason   String?
+  trainerId      String?
+  trainer        User?          @relation("TrainerCourses", fields: [trainerId], references: [id], onDelete: SetNull)
+  modules        Module[]
+  quizzes        Quiz[]
+  enrollments    Enrollment[]
+  certificates   Certificate[]
+  learningPathCourses LearningPathCourse[]
+  discussionThreads DiscussionThread[]
+}
+
+model Module {
+  id       String   @id @default(cuid())
+  courseId String
+  course   Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title    String
+  order    Int
+  lessons  Lesson[]
+
+  @@index([courseId])
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  moduleId    String
+  module      Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  title       String
+  order       Int
+  contentType String   @default("VIDEO")
+  videoUrl    String?
+  bodyMd      String?
+  quizId      String?
+  quiz        Quiz?      @relation(fields: [quizId], references: [id])
+  progress    LessonProgress[]
+  videoAsset  VideoAsset?
+
+  @@index([moduleId])
+}
+
+model Enrollment {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  enrolledAt DateTime @default(now())
+
+  @@unique([userId, courseId])
+  @@index([userId])
+}
+
+model LessonProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId    String
+  lesson      Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  completed   Boolean  @default(true)
+  completedAt DateTime @default(now())
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+}
+
+model Quiz {
+  id            String   @id @default(cuid())
+  courseId      String?
+  course        Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title         String
+  passPercent   Int      @default(70)
+  questionsJson String
+  lessons       Lesson[]
+}
+
+model Certificate {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  issuedAt   DateTime @default(now())
+  verifyCode String   @unique
+
+  @@unique([userId, courseId])
+  @@index([userId])
+}
+
+model Order {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId    String?
+  learningPathId String?
+  learningPath LearningPath? @relation(fields: [learningPathId], references: [id], onDelete: SetNull)
+  amountPaise Int      @default(0)
+  currency    String   @default("INR")
+  status      String   @default("DRAFT")
+  provider    String   @default("stub")
+  /// e.g. pi_xxx when using Stripe later
+  externalPaymentId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// Ordered learning paths (Udemy-style skill tracks)
+model LearningPath {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  description String
+  track       String
+  hours       Int
+  icon        String
+  courseCount Int      @default(0)
+  published   Boolean  @default(true)
+  courses     LearningPathCourse[]
+  enrollments PathEnrollment[]
+  orders      Order[]
+}
+
+model LearningPathCourse {
+  id       String       @id @default(cuid())
+  pathId   String
+  path     LearningPath @relation(fields: [pathId], references: [id], onDelete: Cascade)
+  courseId String
+  course   Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  order    Int
+
+  @@unique([pathId, courseId])
+  @@index([pathId])
+}
+
+model PathEnrollment {
+  id         String       @id @default(cuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pathId     String
+  path       LearningPath @relation(fields: [pathId], references: [id], onDelete: Cascade)
+  enrolledAt DateTime     @default(now())
+
+  @@unique([userId, pathId])
+  @@index([userId])
+}
+
+/// Trainer payout stub (Stripe Connect–style later)
+model PayoutBatch {
+  id          String   @id @default(cuid())
+  trainerId   String
+  trainer     User     @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  amountPaise Int
+  currency    String   @default("INR")
+  status      String   @default("PENDING")
+  periodLabel String
+  createdAt   DateTime @default(now())
+
+  @@index([trainerId])
+}
+
+/// Mux / Cloudflare Stream style — processing state per lesson
+model VideoAsset {
+  id         String   @id @default(cuid())
+  lessonId   String   @unique
+  lesson     Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  provider   String   @default("stub")
+  externalId String?
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+/// Per-course discussion stub (expand to posts later)
+model DiscussionThread {
+  id        String   @id @default(cuid())
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime @default(now())
+
+  @@index([courseId])
+}
+
+model LabOffering {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  description String
+  status      String   @default("COMING_SOON")
+  createdAt   DateTime @default(now())
+}
